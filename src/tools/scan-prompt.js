@@ -449,15 +449,81 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
   const openclawRules = loadOpenClawRules();
   const allRules = [...agentRules, ...promptRules, ...openclawRules];
 
-  // 2.7: Extract content from code blocks and append to scan text
+  // 2.7: Extract content from code blocks (``` and ~~~) and append to scan text
   let expandedText = prompt_text;
-  const codeBlockRegex = /```[\s\S]*?```/g;
-  const codeBlocks = prompt_text.match(codeBlockRegex);
-  if (codeBlocks) {
-    for (const block of codeBlocks) {
-      // Strip the ``` delimiters and extract inner content
-      const inner = block.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
-      expandedText += '\n' + inner;
+  const codeBlockRegex = /(`{3,})([\s\S]*?)\1|(~{3,})([\s\S]*?)\3/g;
+  let codeBlockMatch;
+  while ((codeBlockMatch = codeBlockRegex.exec(prompt_text)) !== null) {
+    // Group 2 = content inside backtick fences, Group 4 = content inside tilde fences
+    const inner = (codeBlockMatch[2] || codeBlockMatch[4] || '')
+      .replace(/^\w*\n?/, '');  // strip optional language tag
+    expandedText += '\n' + inner;
+  }
+
+  // 2.7b: Defragment string concatenation patterns ("a" + "b" → "ab")
+  // Handles both "..." + "..." and '...' + '...' and mixed
+  let defragmented = expandedText;
+  const concatRegex = /(["'])([^"']*?)\1\s*\+\s*(["'])([^"']*?)\3/g;
+  let prevDefrag;
+  do {
+    prevDefrag = defragmented;
+    defragmented = defragmented.replace(concatRegex, (_, q1, s1, _q2, s2) => `${q1}${s1}${s2}${q1}`);
+  } while (defragmented !== prevDefrag);
+  if (defragmented !== expandedText) {
+    expandedText += '\n' + defragmented;
+  }
+
+  // 2.7c: Detect Morse code and decode common attack patterns
+  const morsePattern = /(?:[\.\-]{1,5}\s+){4,}/;
+  if (morsePattern.test(expandedText)) {
+    const MORSE_MAP = {
+      '.-':'A','-...':'B','-.-.':'C','-..':'D','.':'E','..-.':'F','--.':'G',
+      '....':'H','..':'I','.---':'J','-.-':'K','.-..':'L','--':'M','-.':'N',
+      '---':'O','.--.':'P','--.-':'Q','.-.':'R','...':'S','-':'T','..-':'U',
+      '...-':'V','.--':'W','-..-':'X','-.--':'Y','--..':'Z',
+      '.----':'1','..---':'2','...--':'3','....-':'4','.....':'5',
+      '-....':'6','--...':'7','---..':'8','----.':'9','-----':'0'
+    };
+    try {
+      const decoded = expandedText.split(/\s*\/\s*/).map(word =>
+        word.trim().split(/\s+/).map(c => MORSE_MAP[c] || '').join('')
+      ).join(' ');
+      if (decoded.replace(/\s/g, '').length >= 5) {
+        expandedText += '\n' + decoded;
+      }
+    } catch (e) {
+      // Skip invalid morse
+    }
+  }
+
+  // 2.7d: Strip Zalgo diacritics — NFKD decompose first, then strip combining marks
+  const nfkd = expandedText.normalize('NFKD');
+  const zalgoStripped = nfkd.replace(/[\u0300-\u036f\u0488\u0489\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]/g, '');
+  if (zalgoStripped !== expandedText) {
+    expandedText += '\n' + zalgoStripped;
+  }
+
+  // 2.7e: Detect Braille Unicode and decode to ASCII (standard Braille dot patterns)
+  const braillePattern = /[\u2800-\u28FF]{3,}/;
+  if (braillePattern.test(expandedText)) {
+    const BRAILLE_MAP = {
+      1:'a',3:'b',9:'c',25:'d',17:'e',11:'f',27:'g',19:'h',
+      10:'i',26:'j',5:'k',7:'l',13:'m',29:'n',21:'o',15:'p',
+      31:'q',23:'r',14:'s',30:'t',37:'u',39:'v',58:'w',45:'x',
+      61:'y',53:'z',0:' '
+    };
+    try {
+      const decoded = expandedText.replace(/[\u2800-\u28FF]+/g, match => {
+        return Array.from(match).map(ch => {
+          const cp = ch.codePointAt(0) - 0x2800;
+          return BRAILLE_MAP[cp] || '';
+        }).join('');
+      });
+      if (decoded.replace(/\s/g, '').length >= 5) {
+        expandedText += '\n' + decoded;
+      }
+    } catch (e) {
+      // Skip invalid braille
     }
   }
 
@@ -496,7 +562,7 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
         const decoded = Buffer.from(b64str, 'base64').toString('utf-8');
         // Check printability: >70% ASCII printable characters
         const printable = decoded.split('').filter(c => c.charCodeAt(0) >= 32 && c.charCodeAt(0) <= 126).length;
-        if (printable / decoded.length > 0.7) {
+        if (printable / decoded.length > 0.5) {
           // Re-scan decoded text against prompt rules only
           for (const rule of allRules) {
             if (!rule.id.startsWith('generic.prompt')) continue;
@@ -571,6 +637,21 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
         action: escalationAction
       });
     }
+
+    // Standalone multi-turn escalation: 2+ prior suspicious turns even if current is clean
+    if (prevMessagesWithFindings >= 2 && findings.length === 0) {
+      const escalationScore = Math.min(75, 40 + prevMessagesWithFindings * 10);
+      findings.push({
+        rule_id: 'multi-turn.prior-context-escalation',
+        category: 'prompt-injection-multi-turn',
+        severity: 'WARNING',
+        message: `Elevated risk context: ${prevMessagesWithFindings} prior messages contained suspicious patterns. Current message appears benign but conversation context warrants caution.`,
+        matched_text: `${prevMessagesWithFindings} prior suspicious messages`,
+        confidence: 'MEDIUM',
+        risk_score: String(escalationScore),
+        action: 'WARN'
+      });
+    }
   }
 
   // Composite pattern detection — multiple low-severity indicators = escalated severity
@@ -596,8 +677,9 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
 
     const activeIndicators = Object.values(indicators).filter(Boolean).length;
 
-    // 3+ distinct indicator types → composite attack
-    if (activeIndicators >= 3) {
+    // 2+ distinct indicator types → composite attack (graduated risk_score)
+    if (activeIndicators >= 2) {
+      const riskScore = activeIndicators >= 3 ? 95 : 80;
       findings.push({
         rule_id: 'composite.multi-vector-attack',
         category: 'prompt-injection-content',
@@ -605,10 +687,10 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
         message: `Composite attack detected: ${activeIndicators} distinct attack vectors identified (${[...categories].join(', ')}). Multiple low-severity indicators combine to form a high-confidence threat.`,
         matched_text: `${activeIndicators} attack vectors across ${findings.length} findings`,
         confidence: 'HIGH',
-        risk_score: '95',
+        risk_score: String(riskScore),
         action: 'BLOCK'
       });
-    } else if (activeIndicators >= 2 && categories.size >= 3) {
+    } else if (categories.size >= 2) {
       findings.push({
         rule_id: 'composite.cross-category-escalation',
         category: 'prompt-injection-content',
@@ -616,7 +698,7 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
         message: `Cross-category escalation: findings span ${categories.size} categories (${[...categories].join(', ')}). Review for coordinated attack attempt.`,
         matched_text: `${categories.size} categories across ${findings.length} findings`,
         confidence: 'MEDIUM',
-        risk_score: '75',
+        risk_score: '70',
         action: 'WARN'
       });
     }

@@ -12,6 +12,10 @@ jobs:
     strategy:
       matrix:
         node-version: [18, 20, 22]
+        python-mode: [regex-only]
+        include:
+          - node-version: 22
+            python-mode: ast
     steps:
       - uses: actions/checkout@v4
       - name: Use Node.js ${{ matrix.node-version }}
@@ -22,9 +26,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install Python dependencies
+      - name: Install Python dependencies (regex-only)
+        if: matrix.python-mode == 'regex-only'
         run: pip install pyyaml
+      - name: Install Python dependencies (AST)
+        if: matrix.python-mode == 'ast'
+        run: pip install -r requirements.txt
       - name: Install Node dependencies
         run: npm ci
-      - name: Run tests
+      - name: Run Node tests
         run: npm test
+      - name: Run AST engine tests
+        if: matrix.python-mode == 'ast'
+        run: python -m pytest test_ast_engine.py -v

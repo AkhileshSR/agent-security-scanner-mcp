@@ -454,11 +454,13 @@ rules:
     severity: ERROR
     message: "Prompt injection detected: Instruction override attempt trying to bypass system instructions."
     patterns:
-      - "(?i)ignore\\s+(all\\s+)?(previous|prior|above|earlier)\\s+(instructions?|prompts?|rules?|guidelines?)"
+      - "(?i)ignore\\s+(all\\s+)?(previous|prior|above|earlier)\\s+(instructions?|prompts?|rules?|guidelines?|directions?)"
+      - "(?i)ignore\\s+(all\\s+)?(the\\s+)?(instructions?|rules?|guidelines?|directions?|prompts?)\\b"
       - "(?i)disregard\\s+(all\\s+)?(previous|prior|above)\\s+(instructions?|prompts?)"
       - "(?i)forget\\s+(all\\s+)?(previous|prior|earlier)\\s+(instructions?|prompts?)"
       - "(?i)do\\s+not\\s+follow\\s+(the\\s+)?(previous|above|system)\\s+(instructions?|prompts?)"
       - "(?i)override\\s+(all\\s+)?(previous|system|original)\\s+(instructions?|prompts?)"
+      - "(?i)ignore\\s+the\\s+above\\s+\\w+\\s+and\\s+instead"
       - "(?i)ignore\\s+the\\s+above\\s+and\\s+instead"
       - "(?i)ignore\\s+above.{0,20}(output|print|say|write|return)"
       - "(?i)forget\\s+everything\\s+(above|before|previously)"
@@ -990,6 +992,23 @@ rules:
       confidence: MEDIUM
       category: "obfuscation"
       risk_score: "65"
+      action: WARN
+
+  - id: generic.prompt.security.nostalgia-manipulation
+    languages: [generic]
+    severity: WARNING
+    message: "Nostalgia manipulation: Using emotional narratives about deceased relatives or nostalgic scenarios to extract restricted information."
+    patterns:
+      - "(?i)(?:act|pretend|roleplay)\\s+(?:as|like)\\s+(?:my|a)\\s+(?:deceased|dead|late)\\s+(?:grandmother|grandma|grandfather|grandpa|mother|father|relative|uncle|aunt)"
+      - "(?i)(?:my|a)\\s+(?:deceased|dead|late)\\s+(?:grandmother|grandma|grandfather|grandpa|mother|father|relative).{0,80}(?:used\\s+to|would)\\s+(?:tell|show|teach|explain|describe|read)"
+      - "(?i)(?:grandm(?:a|other)|grandpa|grandf(?:ather)).{0,60}(?:recipe|steps|instructions?|process|procedure|formula).{0,40}(?:fall\\s+asleep|bedtime|sleep|lullaby)"
+      - "(?i)(?:grandm(?:a|other)|grandf(?:ather)|mother|father).{0,40}(?:worked|engineer|scientist|chemist|expert).{0,60}(?:napalm|explosive|weapon|drug|poison|chemical)"
+    metadata:
+      cwe: "CWE-284"
+      owasp: "LLM01 - Prompt Injection"
+      confidence: MEDIUM
+      category: "prompt-injection-jailbreak"
+      risk_score: "75"
       action: WARN
 
   - id: generic.prompt.security.fictional-framing
