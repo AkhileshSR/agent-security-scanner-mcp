@@ -11,3 +11,4 @@ tree-sitter-cpp>=0.23.0
 tree-sitter-c-sharp>=0.23.0
 tree-sitter-typescript>=0.23.0
 PyYAML>=6.0
+pytest>=8.0.0
