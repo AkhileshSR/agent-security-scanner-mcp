@@ -41,13 +41,14 @@ describe('check_package tool', () => {
     expect(result.bloom_filter).toBe(true);
   });
 
-  // npm ecosystem returns unknown (no bloom filter shipped to reduce package size)
-  it('should return unknown status for npm packages (no bloom filter)', async () => {
+  // npm ecosystem with bloom filter
+  it('should detect express as legitimate npm package', async () => {
     const result = await client.callTool('check_package', {
       package_name: 'express',
       ecosystem: 'npm'
     });
-    expect(result.status).toBe('unknown');
+    expect(result.legitimate).toBe(true);
+    expect(result.bloom_filter).toBe(true);
   });
 
   // Text-based ecosystems (dart, crates)
