@@ -114,7 +114,7 @@ resource "aws_db_instance" "hardcoded_creds" {
 }
 
 variable "api_key" {
-  default = "test_FAKEFAKEFAKEFAKE1234"
+  default = "EXAMPLE_API_KEY_FOR_TESTING"
 }
 
 # AWS Access Key Hardcoded - should be detected

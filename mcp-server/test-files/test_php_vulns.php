@@ -53,7 +53,7 @@ header("Location: " . $_GET['redirect']);
 
 // Hardcoded Credentials - should be detected
 $password = "supersecretpassword123";
-$api_key = "test_FAKEFAKEFAKEFAKE1234";
+$api_key = "EXAMPLE_API_KEY_FOR_TESTING";
 
 // Information Disclosure - should be detected
 phpinfo();
