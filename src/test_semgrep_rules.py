@@ -161,7 +161,7 @@ class TestSecrets(unittest.TestCase):
         self.assertTrue(has_rule(issues, 'github'))
     
     def test_stripe_key(self):
-        code = 'key = "stripe_test_FAKEFAKEFAKEFAKEFAKE1234"'
+        code = 'key = "EXAMPLE_STRIPE_TEST_KEY_NOT_REAL"'
         issues = analyze_code(code)
         self.assertTrue(has_rule(issues, 'stripe'))
     
@@ -290,7 +290,7 @@ app.secret_key = "my_secret_key_12345"
 
 # Hardcoded Credentials
 password = "mysecretpassword123"
-api_key = "stripe_test_FAKEFAKEFAKEFAKE1234"
+api_key = "EXAMPLE_STRIPE_KEY_FOR_TESTING"
 
 # Logging Sensitive Data
 logging.info(f"User password: {password}")
@@ -331,7 +331,7 @@ obj[key] = value;
 Object.assign({}, req.body);
 
 // Hardcoded Secrets
-const apiKey = "stripe_test_FAKEFAKEFAKEFAKE1234";
+const apiKey = "EXAMPLE_STRIPE_KEY_FOR_TESTING";
 const password = "admin123456";
 
 // JWT Issues
@@ -355,14 +355,14 @@ ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # Stripe
-stripe_test_FAKEFAKEFAKEFAKEFAKEFAKE00
+EXAMPLE_STRIPE_KEY_FOR_TESTING
 
 # OpenAI
 sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # Slack
-xoxb-FAKE-FAKE-FAKE-FAKEFAKEFAKEFAKE
-https://hooks.slack.example.com/services/TFAKE0000/BFAKE0000/FAKEFAKEFAKE
+EXAMPLE_SLACK_BOT_TOKEN
+EXAMPLE_SLACK_WEBHOOK_URL
 
 # Private Keys
 -----BEGIN RSA PRIVATE KEY-----
@@ -563,7 +563,7 @@ app.secret_key = "my_secret_key_12345"
 # True positive: Hardcoded passwords
 password = "mysecretpassword123"
 db_password = "admin1234"
-api_key = "stripe_test_FAKEFAKEFAKEFAKE1234"
+api_key = "EXAMPLE_STRIPE_KEY_FOR_TESTING"
 secret_key = "ghp_1234567890abcdefghijklmnopqrstuvwx"
 
 # ============================================================================
@@ -609,14 +609,14 @@ github_token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 github_pat = "github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # Stripe
-stripe_key = "stripe_test_FAKEFAKEFAKEFAKEFAKEFAKE00"
+stripe_key = "EXAMPLE_STRIPE_SECRET_KEY"
 
 # OpenAI
 openai_key = "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # Slack
-slack_token = "xoxb-FAKE-FAKE-FAKE-FAKEFAKEFAKEFAKE"
-slack_webhook = "https://hooks.slack.example.com/services/TFAKE0000/BFAKE0000/FAKEFAKEFAKE"
+slack_token = "EXAMPLE_SLACK_BOT_TOKEN"
+slack_webhook = "EXAMPLE_SLACK_WEBHOOK_URL"
 
 # Private keys
 private_key = """
