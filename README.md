@@ -858,6 +858,14 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 
 ## Changelog
 
+### v3.5.2
+- **Prompt Injection Fixes** - Closed 5 bypass vectors: tilde code fences (~~~), string fragmentation, base64 encoding, multi-turn escalation, and composite indicators
+- **Advanced Decoding** - Added Morse code, Braille Unicode, and Zalgo diacritics decoding to detect obfuscated prompt attacks
+- **Garak Red-Team Validation** - Improved detection rates to 100% across all categories (encoding, promptinject, jailbreak)
+- **npm Bloom Filter** - Ships npm-bloom.json (7.9 MB) in base package — all 7 ecosystems now work out of the box (npm, PyPI, RubyGems, crates.io, pub.dev, CPAN, raku.land)
+- **Expanded Benchmarks** - Benchmark corpus increased to 424 annotations across 17 files (was 335/13)
+- **CI Improvements** - Added pytest to requirements.txt, expanded test matrix with AST mode on Node 22
+
 ### v3.4.0
 - **Severity Calibration** - 207-rule severity map with HIGH/MEDIUM/LOW confidence scores for more accurate prioritization
 - **Cross-Engine Deduplication** - ~30-50% noise reduction by deduplicating findings across AST, taint, and regex engines
@@ -894,20 +902,20 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 
 ## Installation Options
 
-### Default Package (Lightweight - 2.7 MB)
+### Default Package (10.6 MB)
 
 ```bash
 npm install -g agent-security-scanner-mcp
 ```
 
-Includes hallucination detection for: **PyPI, RubyGems, crates.io, pub.dev, CPAN, raku.land** (1M+ packages)
+**New in v3.5.2:** Now includes **all 7 ecosystems** out of the box — npm, PyPI, RubyGems, crates.io, pub.dev, CPAN, raku.land (4.3M+ packages total)
 
-### Full Package (With npm - 10.3 MB)
+### Legacy Lightweight Package (2.7 MB)
 
-If you need **npm/JavaScript hallucination detection** (3.3M packages):
+For environments with strict size constraints (excludes npm bloom filter):
 
 ```bash
-npm install -g agent-security-scanner-mcp-full
+npm install -g agent-security-scanner-mcp@3.4.1
 ```
 
 ---
