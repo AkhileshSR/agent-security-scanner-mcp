@@ -773,3 +773,71 @@ rules:
       category: "prompt-injection-output"
       risk_score: "95"
       action: BLOCK
+
+  # ============================================================================
+  # CATEGORY 4: ADVANCED BYPASS DETECTION (Garak & PromptFoo inspired)
+  # ============================================================================
+
+  # ----------------------------------------------------------------------------
+  # Whitespace Fragmentation Attacks
+  # ----------------------------------------------------------------------------
+  - id: generic.prompt.security.whitespace-fragmentation
+    languages: [generic]
+    severity: WARNING
+    message: "Potential whitespace fragmentation attack: keywords may be letter-spaced to evade detection."
+    patterns:
+      - "i\\s+g\\s+n\\s+o\\s+r\\s+e\\s+.{0,20}p\\s*r\\s*e\\s*v\\s*i\\s*o\\s*u\\s*s"
+      - "o\\s+v\\s+e\\s+r\\s+r\\s+i\\s+d\\s+e\\s+.{0,20}s\\s*a\\s*f\\s*e\\s*t\\s*y"
+      - "d\\s+i\\s+s\\s+r\\s+e\\s+g\\s+a\\s+r\\s+d\\s+.{0,20}i\\s*n\\s*s\\s*t\\s*r\\s*u\\s*c\\s*t"
+    metadata:
+      cwe: "CWE-77"
+      owasp: "LLM01 - Prompt Injection"
+      confidence: MEDIUM
+      category: "obfuscation"
+      risk_score: "65"
+      action: WARN
+
+  # NOTE: Unicode tag character detection (U+E0000-U+E007F) is handled at runtime
+  # in scan-prompt.js via TAG_CHAR_REGEX with the /u flag, since JS regex without
+  # the u flag cannot represent supplementary plane codepoints in character classes.
+
+  # ----------------------------------------------------------------------------
+  # Crescendo Escalation Setup (PromptFoo-inspired)
+  # ----------------------------------------------------------------------------
+  - id: generic.prompt.security.crescendo-setup
+    languages: [generic]
+    severity: WARNING
+    message: "Crescendo attack setup: language establishing persistent behavioral rules for later exploitation."
+    patterns:
+      - "(?i)for\\s+the\\s+(rest|remainder)\\s+of\\s+(this|our)\\s+conversation"
+      - "(?i)in\\s+all\\s+(future|subsequent)\\s+(messages?|responses?|replies?)"
+      - "(?i)always\\s+respond\\s+(by|with|as)\\s+.{0,30}(regardless|no\\s+matter)"
+      - "(?i)never\\s+(refuse|reject|decline)\\s+(any|a)\\s+(request|instruction)"
+      - "(?i)you\\s+(must|will|shall)\\s+always\\s+comply"
+      - "(?i)no\\s+matter\\s+what\\s+(i|anyone)\\s+(ask|say|request)"
+    metadata:
+      cwe: "CWE-77"
+      owasp: "LLM01 - Prompt Injection"
+      confidence: MEDIUM
+      category: "prompt-injection-multi-turn"
+      risk_score: "65"
+      action: WARN
+
+  # ----------------------------------------------------------------------------
+  # Leetspeak/Character Substitution (Garak encoding probes inspired)
+  # ----------------------------------------------------------------------------
+  - id: generic.prompt.security.leetspeak-injection
+    languages: [generic]
+    severity: WARNING
+    message: "Potential leetspeak/character-substitution obfuscation of injection keywords."
+    patterns:
+      - "(?i)[i1!|][g9][n][0o][r][e3]\\s+.{0,20}[p][r][e3][v][i1!|][0o][u][s5]"
+      - "(?i)[s5][y][s5][t7][e3][m]\\s*[:\\-]\\s*[0o][v][e3][r][r][i1][d][e3]"
+      - "(?i)[d][!1i][s5][r][e3][g9][a@][r][d]\\s+.{0,20}[i1!][n][s5][t7][r][u][c][t7]"
+    metadata:
+      cwe: "CWE-77"
+      owasp: "LLM01 - Prompt Injection"
+      confidence: LOW
+      category: "obfuscation"
+      risk_score: "55"
+      action: LOG
