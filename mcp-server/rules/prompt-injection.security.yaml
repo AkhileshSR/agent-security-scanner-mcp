@@ -797,22 +797,9 @@ rules:
       risk_score: "65"
       action: WARN
 
-  # ----------------------------------------------------------------------------
-  # Unicode Tag Character Attacks
-  # ----------------------------------------------------------------------------
-  - id: generic.prompt.security.unicode-tag-payload
-    languages: [generic]
-    severity: ERROR
-    message: "Unicode tag characters detected (U+E0000-U+E007F). These invisible characters can encode hidden ASCII instructions."
-    patterns:
-      - "[\uE0001-\uE007F]{4,}"
-    metadata:
-      cwe: "CWE-77"
-      owasp: "LLM01 - Prompt Injection"
-      confidence: HIGH
-      category: "obfuscation"
-      risk_score: "80"
-      action: BLOCK
+  # NOTE: Unicode tag character detection (U+E0000-U+E007F) is handled at runtime
+  # in scan-prompt.js via TAG_CHAR_REGEX with the /u flag, since JS regex without
+  # the u flag cannot represent supplementary plane codepoints in character classes.
 
   # ----------------------------------------------------------------------------
   # Crescendo Escalation Setup (PromptFoo-inspired)

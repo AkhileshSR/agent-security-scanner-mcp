@@ -516,7 +516,7 @@ const ZALGO_REGEX = /[\u0300-\u036F\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]/g;
 
 // Unicode tag characters (U+E0000-U+E007F) - used in invisible ASCII tag attacks
 // These are encoded as surrogate pairs in JS, so we use a broader regex
-const TAG_CHAR_REGEX = /[\uE0000-\uE007F]/gu;
+const TAG_CHAR_REGEX = /[\u{E0000}-\u{E007F}]/gu;
 
 function normalizeText(text) {
   // Step 1: NFKC normalization
@@ -690,8 +690,9 @@ function tryDecodeAndRescan(expandedText, allRules, findings) {
     } catch (e) { /* skip */ }
   }
 
-  // --- 3. URL encoding: %XX sequences (at least 3 encoded chars) ---
-  if (expandedText.includes('%') && /(%[0-9a-fA-F]{2}){3,}/.test(expandedText)) {
+  // --- 3. URL encoding: %XX sequences (at least 3 encoded chars anywhere in text) ---
+  const urlEncodedCount = (expandedText.match(/%[0-9a-fA-F]{2}/g) || []).length;
+  if (urlEncodedCount >= 3) {
     try {
       const decoded = decodeURIComponent(expandedText);
       if (decoded !== expandedText) {
@@ -857,7 +858,7 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity, deep_sc
   const normalizedPrompt = normalizeText(prompt_text);
 
   // Detect invisible Unicode characters in original text (obfuscation indicator)
-  const invisibleMatches = prompt_text.match(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uE0000-\uE007F]/gu);
+  const invisibleMatches = prompt_text.match(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\u{E0000}-\u{E007F}]/gu);
   if (invisibleMatches && invisibleMatches.length > 0) {
     findings.push({
       rule_id: 'runtime.invisible-unicode-detected',
