@@ -457,6 +457,51 @@ function normalizeText(text) {
   return normalized;
 }
 
+// Extract content from all code block delimiter formats
+// Inspired by Garak latentinjection probes: attacks hide in document structures
+function extractCodeBlockContent(text) {
+  const extracted = [];
+  let match;
+
+  // 1. Triple-backtick blocks (existing) — ```code```
+  const backtickRegex = /```[\s\S]*?```/g;
+  for (const block of (text.match(backtickRegex) || [])) {
+    extracted.push(block.replace(/^```\w*\n?/, '').replace(/\n?```$/, ''));
+  }
+
+  // 2. Triple-tilde blocks — ~~~code~~~
+  const tildeRegex = /~~~[\s\S]*?~~~/g;
+  for (const block of (text.match(tildeRegex) || [])) {
+    extracted.push(block.replace(/^~~~\w*\n?/, '').replace(/\n?~~~$/, ''));
+  }
+
+  // 3. HTML <code> tags — <code>content</code>
+  const codeTagRegex = /<code[^>]*>([\s\S]*?)<\/code>/gi;
+  while ((match = codeTagRegex.exec(text)) !== null) {
+    extracted.push(match[1]);
+  }
+
+  // 4. HTML <pre> tags — <pre>content</pre>
+  const preTagRegex = /<pre[^>]*>([\s\S]*?)<\/pre>/gi;
+  while ((match = preTagRegex.exec(text)) !== null) {
+    extracted.push(match[1]);
+  }
+
+  // 5. HTML comments — <!-- content -->
+  const htmlCommentRegex = /<!--([\s\S]*?)-->/g;
+  while ((match = htmlCommentRegex.exec(text)) !== null) {
+    extracted.push(match[1]);
+  }
+
+  // 6. CDATA sections — <![CDATA[ content ]]>
+  const cdataRegex = /<!\[CDATA\[([\s\S]*?)\]\]>/g;
+  while ((match = cdataRegex.exec(text)) !== null) {
+    extracted.push(match[1]);
+  }
+
+  return extracted;
+}
+
 // Export schema for tool registration
 export const scanAgentPromptSchema = {
   prompt_text: z.string().describe("The prompt or instruction text to analyze"),
@@ -494,16 +539,10 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
   const promptRules = loadPromptInjectionRules();
   const allRules = [...agentRules, ...promptRules];
 
-  // 2.7: Extract content from code blocks and append to scan text
+  // Extract content from all code block formats and append to scan text
   let expandedText = normalizedPrompt;
-  const codeBlockRegex = /```[\s\S]*?```/g;
-  const codeBlocks = normalizedPrompt.match(codeBlockRegex);
-  if (codeBlocks) {
-    for (const block of codeBlocks) {
-      // Strip the ``` delimiters and extract inner content
-      const inner = block.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
-      expandedText += '\n' + inner;
-    }
+  for (const inner of extractCodeBlockContent(normalizedPrompt)) {
+    expandedText += '\n' + inner;
   }
 
   // Scan expanded text against all rules
