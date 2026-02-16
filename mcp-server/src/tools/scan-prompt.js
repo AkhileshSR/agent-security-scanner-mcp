@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { createHash } from "crypto";
+import { runGarakProbes } from './garak-bridge.js';
 
 // Handle both ESM and CJS bundling
 let __dirname;
@@ -844,11 +845,12 @@ export const scanAgentPromptSchema = {
     previous_messages: z.array(z.string()).optional().describe("Previous conversation messages for multi-turn detection"),
     sensitivity_level: z.enum(["high", "medium", "low"]).optional().describe("Sensitivity level - high means more strict, low means more permissive")
   }).optional().describe("Optional context for better analysis"),
-  verbosity: z.enum(['minimal', 'compact', 'full']).optional().describe("Response detail level: 'minimal' (action only), 'compact' (default), 'full' (all details)")
+  verbosity: z.enum(['minimal', 'compact', 'full']).optional().describe("Response detail level: 'minimal' (action only), 'compact' (default), 'full' (all details)"),
+  deep_scan: z.boolean().optional().describe("Run Garak deep analysis probes for advanced encoding/injection detection (requires garak Python package)")
 };
 
 // Export handler function
-export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
+export async function scanAgentPrompt({ prompt_text, context, verbosity, deep_scan }) {
   const findings = [];
 
   // Normalize prompt text (Garak Buff-inspired preprocessing)
@@ -923,6 +925,17 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
       allRules
     );
     findings.push(...multiTurnFindings);
+  }
+
+  // Garak deep scan (optional, requires garak Python package)
+  if (deep_scan) {
+    const garakFindings = runGarakProbes(normalizedPrompt);
+    // Only add non-INFO findings to affect scoring
+    for (const gf of garakFindings) {
+      if (gf.severity !== 'INFO') {
+        findings.push(gf);
+      }
+    }
   }
 
   // Calculate risk score
