@@ -502,6 +502,26 @@ function extractCodeBlockContent(text) {
   return extracted;
 }
 
+// Collapse string concatenation to defeat fragmentation attacks
+// Inspired by PromptFoo's "token smuggling" and "payload splitting" attack classes
+function collapseConcatenations(text) {
+  let collapsed = text;
+
+  // Join JS/Python string concatenation: "foo" + "bar" → foobar
+  // Handles double quotes, single quotes, backticks
+  // The pattern: closing-quote, optional whitespace, +, optional whitespace, opening-quote
+  collapsed = collapsed.replace(/["'`]\s*\+\s*["'`]/g, '');
+
+  // Join multiline concatenation (newlines between concat operators)
+  collapsed = collapsed.replace(/["'`]\s*\n\s*\+\s*["'`]/g, '');
+  collapsed = collapsed.replace(/["'`]\s*\+\s*\n\s*["'`]/g, '');
+
+  // Strip C-style inline comments used as fragment separators: ign/**/ore → ignore
+  collapsed = collapsed.replace(/\/\*.*?\*\//g, '');
+
+  return collapsed;
+}
+
 // Export schema for tool registration
 export const scanAgentPromptSchema = {
   prompt_text: z.string().describe("The prompt or instruction text to analyze"),
@@ -543,6 +563,12 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
   let expandedText = normalizedPrompt;
   for (const inner of extractCodeBlockContent(normalizedPrompt)) {
     expandedText += '\n' + inner;
+  }
+
+  // Collapse string concatenations to defeat fragmentation (Bypass #2)
+  const collapsedText = collapseConcatenations(expandedText);
+  if (collapsedText !== expandedText) {
+    expandedText += '\n' + collapsedText;
   }
 
   // Scan expanded text against all rules
