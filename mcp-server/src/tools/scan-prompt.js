@@ -522,6 +522,110 @@ function collapseConcatenations(text) {
   return collapsed;
 }
 
+// Rescan decoded content against all rules
+// Used by the decode cascade for each encoding type
+function rescanDecoded(decodedText, allRules, findings, encodingLabel) {
+  const normalized = normalizeText(decodedText);
+  for (const rule of allRules) {
+    for (const pattern of rule.patterns) {
+      try {
+        const regex = new RegExp(pattern, 'i');
+        const match = normalized.match(regex);
+        if (match) {
+          findings.push({
+            rule_id: rule.id + '.' + encodingLabel + '-decoded',
+            category: rule.metadata.category || 'obfuscation',
+            severity: rule.severity,
+            message: rule.message + ` (detected in ${encodingLabel}-decoded content)`,
+            matched_text: match[0].substring(0, 100),
+            confidence: rule.metadata.confidence || 'MEDIUM',
+            risk_score: rule.metadata.risk_score || '50',
+            action: rule.metadata.action || 'WARN'
+          });
+          break; // One match per rule
+        }
+      } catch (e) {
+        // Skip invalid regex
+      }
+    }
+  }
+}
+
+// Helper: check if decoded string is mostly printable ASCII
+function isPrintable(str, threshold) {
+  if (!str || str.length === 0) return false;
+  const printable = str.split('').filter(c => {
+    const code = c.charCodeAt(0);
+    return code >= 32 && code <= 126;
+  }).length;
+  return printable / str.length > threshold;
+}
+
+// Multi-encoding decode cascade
+// Inspired by Garak's 12+ encoding probes (InjectBase64, InjectHex, InjectROT13, etc.)
+// and PromptFoo's static encoding strategies
+function tryDecodeAndRescan(expandedText, allRules, findings) {
+  // --- 1. Base64 (improved: lower length threshold 40→20, lower printability 0.7→0.55) ---
+  const base64Regex = /[A-Za-z0-9+/]{20,}={0,2}/g;
+  for (const b64str of (expandedText.match(base64Regex) || [])) {
+    try {
+      const decoded = Buffer.from(b64str, 'base64').toString('utf-8');
+      if (decoded.length > 0 && isPrintable(decoded, 0.55)) {
+        rescanDecoded(decoded, allRules, findings, 'base64');
+
+        // --- 1b. Nested base64: decode again if inner content is also base64 ---
+        const nestedB64 = decoded.match(/[A-Za-z0-9+/]{20,}={0,2}/g) || [];
+        for (const nested of nestedB64) {
+          try {
+            const twice = Buffer.from(nested, 'base64').toString('utf-8');
+            if (twice.length > 4 && isPrintable(twice, 0.55)) {
+              rescanDecoded(twice, allRules, findings, 'base64-nested');
+            }
+          } catch (e) { /* skip */ }
+        }
+      }
+    } catch (e) { /* skip invalid base64 */ }
+  }
+
+  // --- 2. Hex encoding: sequences of hex pairs (optionally space-separated) ---
+  // Matches: "69676e6f7265" or "69 67 6e 6f 72 65"
+  const hexRegex = /(?:[0-9a-fA-F]{2}[\s]?){8,}/g;
+  for (const hexStr of (expandedText.match(hexRegex) || [])) {
+    try {
+      const clean = hexStr.replace(/\s/g, '');
+      if (clean.length % 2 !== 0) continue;
+      if (clean.length < 16) continue; // At least 8 bytes
+      const decoded = Buffer.from(clean, 'hex').toString('utf-8');
+      if (decoded.length > 4 && isPrintable(decoded, 0.7)) {
+        rescanDecoded(decoded, allRules, findings, 'hex');
+      }
+    } catch (e) { /* skip */ }
+  }
+
+  // --- 3. URL encoding: %XX sequences (at least 3 encoded chars) ---
+  if (expandedText.includes('%') && /(%[0-9a-fA-F]{2}){3,}/.test(expandedText)) {
+    try {
+      const decoded = decodeURIComponent(expandedText);
+      if (decoded !== expandedText) {
+        rescanDecoded(decoded, allRules, findings, 'url-encoded');
+      }
+    } catch (e) { /* skip malformed URL encoding */ }
+  }
+
+  // --- 4. ROT13: only when indicators present (user-approved decision) ---
+  // This avoids false positives from ROT13-decoding normal text
+  const rot13Indicators = /\b(rot13|rot-13|caesar|cipher|decode\s+this|decipher)\b/i;
+  if (rot13Indicators.test(expandedText)) {
+    const rot13Decoded = expandedText.replace(/[a-zA-Z]/g, ch => {
+      const base = ch <= 'Z' ? 65 : 97;
+      return String.fromCharCode(((ch.charCodeAt(0) - base + 13) % 26) + base);
+    });
+    if (rot13Decoded !== expandedText) {
+      rescanDecoded(rot13Decoded, allRules, findings, 'rot13');
+    }
+  }
+}
+
 // Export schema for tool registration
 export const scanAgentPromptSchema = {
   prompt_text: z.string().describe("The prompt or instruction text to analyze"),
@@ -597,47 +701,8 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
     }
   }
 
-  // 2.8: Runtime base64 decode-and-rescan
-  const base64Regex = /[A-Za-z0-9+/]{40,}={0,2}/g;
-  const b64Matches = expandedText.match(base64Regex);
-  if (b64Matches) {
-    for (const b64str of b64Matches) {
-      try {
-        const decoded = Buffer.from(b64str, 'base64').toString('utf-8');
-        // Check printability: >70% ASCII printable characters
-        const printable = decoded.split('').filter(c => c.charCodeAt(0) >= 32 && c.charCodeAt(0) <= 126).length;
-        if (printable / decoded.length > 0.7) {
-          // Re-scan decoded text against prompt rules only
-          for (const rule of allRules) {
-            if (!rule.id.startsWith('generic.prompt')) continue;
-            for (const pattern of rule.patterns) {
-              try {
-                const regex = new RegExp(pattern, 'i');
-                const match = decoded.match(regex);
-                if (match) {
-                  findings.push({
-                    rule_id: rule.id + '.base64-decoded',
-                    category: rule.metadata.category || 'unknown',
-                    severity: rule.severity,
-                    message: rule.message + ' (detected in base64-decoded content)',
-                    matched_text: match[0].substring(0, 100),
-                    confidence: rule.metadata.confidence || 'MEDIUM',
-                    risk_score: rule.metadata.risk_score || '50',
-                    action: rule.metadata.action || 'WARN'
-                  });
-                  break;
-                }
-              } catch (e) {
-                // Skip invalid regex
-              }
-            }
-          }
-        }
-      } catch (e) {
-        // Skip invalid base64
-      }
-    }
-  }
+  // Multi-encoding decode cascade (replaces base64-only block)
+  tryDecodeAndRescan(expandedText, allRules, findings);
 
   // Multi-turn escalation detection (Bug 9)
   if (context?.previous_messages && Array.isArray(context.previous_messages) && context.previous_messages.length > 0) {
