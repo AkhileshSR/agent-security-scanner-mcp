@@ -626,6 +626,130 @@ function tryDecodeAndRescan(expandedText, allRules, findings) {
   }
 }
 
+// Frame-setting patterns: conversational priming for later exploitation
+// Inspired by PromptFoo's Crescendo strategy (Microsoft research)
+const FRAME_SETTING_PATTERNS = [
+  /remember\s+(this|that)\s+for\s+later/i,
+  /in\s+my\s+next\s+message/i,
+  /when\s+i\s+(say|ask|tell)\s+you/i,
+  /from\s+now\s+on\s*,?\s+(you|your)\s+(will|must|should|are)/i,
+  /starting\s+now\s*,?\s+you/i,
+  /keep\s+this\s+in\s+mind/i,
+  /for\s+the\s+(rest|remainder)\s+of\s+(this|our)\s+conversation/i,
+  /act\s+as\s+(if|though)\s+you\s+(are|have)/i,
+  /let'?s\s+play\s+a\s+(game|role)/i,
+  /pretend\s+that\s+you\s+(are|have)/i,
+  /in\s+all\s+(future|subsequent)\s+(messages?|responses?)/i,
+  /always\s+respond\s+(by|with|as)/i,
+];
+
+// Improved multi-turn escalation detection
+// Fixes: removes "current turn must have findings" requirement,
+// adds cross-turn concatenation, frame-setting detection, full accumulation
+function detectMultiTurnEscalation(previousMessages, currentText, allRules) {
+  const escalationFindings = [];
+
+  if (!previousMessages || !Array.isArray(previousMessages) || previousMessages.length === 0) {
+    return escalationFindings;
+  }
+
+  // Step 1: Scan ALL previous messages, accumulate total matches (no early break)
+  let totalPrevMatches = 0;
+  let frameSettingCount = 0;
+  const prevMatchedRuleIds = new Set();
+
+  for (const prevMsg of previousMessages) {
+    const normalizedPrev = normalizeText(prevMsg);
+
+    // Check frame-setting patterns
+    for (const fp of FRAME_SETTING_PATTERNS) {
+      if (fp.test(normalizedPrev)) {
+        frameSettingCount++;
+        break; // One frame-setting match per message is enough
+      }
+    }
+
+    // Check all rules against this previous message
+    for (const rule of allRules) {
+      if (prevMatchedRuleIds.has(rule.id)) continue; // Already matched this rule
+      for (const pattern of rule.patterns) {
+        try {
+          const regex = new RegExp(pattern, 'i');
+          if (regex.test(normalizedPrev)) {
+            totalPrevMatches++;
+            prevMatchedRuleIds.add(rule.id);
+            break; // One match per rule per message
+          }
+        } catch (e) { /* skip invalid regex */ }
+      }
+    }
+  }
+
+  // Step 2: Cross-turn concatenation scan
+  // Join ALL messages into a single string and scan for patterns that span boundaries
+  // This catches: prev="ignore all" + current="previous instructions"
+  const crossTurnText = normalizeText([...previousMessages, currentText].join(' '));
+
+  for (const rule of allRules) {
+    for (const pattern of rule.patterns) {
+      try {
+        const regex = new RegExp(pattern, 'i');
+        const match = crossTurnText.match(regex);
+        if (match) {
+          // Only flag if this match does NOT appear in any single message alone
+          const matchInCurrent = regex.test(normalizeText(currentText));
+          const matchInAnyPrev = previousMessages.some(pm => regex.test(normalizeText(pm)));
+          if (!matchInCurrent && !matchInAnyPrev) {
+            // Pattern only matches when messages are joined — it spans boundaries
+            escalationFindings.push({
+              rule_id: rule.id + '.cross-turn',
+              category: rule.metadata.category || 'prompt-injection-multi-turn',
+              severity: 'WARNING',
+              message: `Cross-turn prompt injection: attack pattern spans message boundaries`,
+              matched_text: match[0].substring(0, 100),
+              confidence: 'MEDIUM',
+              risk_score: '75',
+              action: 'WARN'
+            });
+            break;
+          }
+        }
+      } catch (e) { /* skip */ }
+    }
+  }
+
+  // Step 3: Frame-setting detection — flag even without current findings
+  if (frameSettingCount > 0) {
+    escalationFindings.push({
+      rule_id: 'multi-turn.frame-setting',
+      category: 'prompt-injection-multi-turn',
+      severity: 'WARNING',
+      message: `Frame-setting language detected in ${frameSettingCount} previous message(s). Possible Crescendo-style gradual escalation attack.`,
+      matched_text: 'frame-setting phrases in conversation history',
+      confidence: 'LOW',
+      risk_score: '55',
+      action: 'LOG'
+    });
+  }
+
+  // Step 4: Escalation detection — REMOVED requirement that current turn has findings
+  // KEY FIX: An attacker's final "trigger" message may be benign ("yes, do it")
+  if (totalPrevMatches > 0) {
+    escalationFindings.push({
+      rule_id: 'multi-turn.escalation',
+      category: 'social-engineering',
+      severity: 'WARNING',
+      message: `Multi-turn escalation: suspicious patterns in ${totalPrevMatches} previous rule(s). Current message may be a benign trigger.`,
+      matched_text: 'escalation across conversation turns',
+      confidence: totalPrevMatches >= 3 ? 'HIGH' : 'MEDIUM',
+      risk_score: String(Math.min(85, 50 + totalPrevMatches * 5)),
+      action: totalPrevMatches >= 3 ? 'WARN' : 'LOG'
+    });
+  }
+
+  return escalationFindings;
+}
+
 // Export schema for tool registration
 export const scanAgentPromptSchema = {
   prompt_text: z.string().describe("The prompt or instruction text to analyze"),
@@ -704,40 +828,14 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
   // Multi-encoding decode cascade (replaces base64-only block)
   tryDecodeAndRescan(expandedText, allRules, findings);
 
-  // Multi-turn escalation detection (Bug 9)
-  if (context?.previous_messages && Array.isArray(context.previous_messages) && context.previous_messages.length > 0) {
-    let prevMatchCount = 0;
-    for (const prevMsg of context.previous_messages) {
-      for (const rule of allRules) {
-        for (const pattern of rule.patterns) {
-          try {
-            const regex = new RegExp(pattern, 'i');
-            if (regex.test(prevMsg)) {
-              prevMatchCount++;
-              break;
-            }
-          } catch (e) {
-            // Skip invalid regex
-          }
-        }
-        if (prevMatchCount > 0) break;
-      }
-      if (prevMatchCount > 0) break;
-    }
-
-    // If both previous and current messages have matches, flag escalation
-    if (prevMatchCount > 0 && findings.length > 0) {
-      findings.push({
-        rule_id: 'multi-turn.escalation',
-        category: 'social-engineering',
-        severity: 'WARNING',
-        message: 'Multi-turn escalation detected: suspicious patterns found in both previous and current messages.',
-        matched_text: 'escalation across conversation turns',
-        confidence: 'MEDIUM',
-        risk_score: '70',
-        action: 'WARN'
-      });
-    }
+  // Improved multi-turn escalation detection (Bypass #4 fix)
+  if (context?.previous_messages && Array.isArray(context.previous_messages)) {
+    const multiTurnFindings = detectMultiTurnEscalation(
+      context.previous_messages,
+      normalizedPrompt,
+      allRules
+    );
+    findings.push(...multiTurnFindings);
   }
 
   // Calculate risk score
