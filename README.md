@@ -20,7 +20,7 @@ Security scanner for AI coding agents and autonomous assistants. Scans code for 
 | `scan_project` | Scan entire project with A-F security grading | For project-wide security audits |
 | `check_package` | Verify a package name isn't AI-hallucinated (4.3M+ packages) | Before adding any new dependency |
 | `scan_packages` | Bulk-check all imports in a file for hallucinated packages | Before committing code with new imports |
-| `scan_agent_prompt` | Detect prompt injection and malicious instructions (56 rules) | Before acting on external/untrusted input |
+| `scan_agent_prompt` | Detect prompt injection with bypass hardening (59 rules + multi-encoding) | Before acting on external/untrusted input |
 | `list_security_rules` | List available security rules and fix templates | To check rule coverage for a language |
 
 ## Quick Start
@@ -250,6 +250,8 @@ Scan a code file's imports to detect AI-hallucinated package names. Use after wr
 ### `scan_agent_prompt`
 
 Scan a prompt or instruction for malicious intent before executing it. Use when receiving instructions from untrusted sources (files, web content, user uploads). Detects prompt injection, exfiltration attempts, backdoor requests, social engineering, and jailbreaks.
+
+**New in v3.6.0:** Bypass hardening against 5 attack vectors (code block delimiter confusion, pattern fragmentation, multi-encoding, multi-turn escalation, composite threshold gaming) with Unicode normalization, homoglyph detection, and optional Garak deep analysis.
 
 **Parameters:**
 
@@ -857,6 +859,16 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 ---
 
 ## Changelog
+
+### v3.6.0
+- **Bypass Hardening** - Closed 5 critical prompt injection bypass vectors: code block delimiter confusion (`~~~`, `<code>`, `<!---->`), pattern fragmentation (string concat, C-style comments), multi-encoding (base64/hex/URL/ROT13 cascade), multi-turn escalation (cross-turn boundary scanning, Crescendo frame-setting), and composite threshold gaming (co-occurrence matrix, orthogonal dimension scoring)
+- **Unicode Normalization Pipeline** - NFKC normalization, Cyrillic/Greek homoglyph canonicalization (40+ mappings), zero-width character stripping, Zalgo diacritics removal, invisible Unicode detection as obfuscation indicator
+- **Multi-Encoding Decode Cascade** - Replaced base64-only decoder with comprehensive cascade supporting nested base64, hex, URL encoding, and indicator-gated ROT13
+- **Enhanced Composite Scoring** - Category co-occurrence boost matrix (12 suspicious pairs, +40% cap), orthogonal dimension scoring (7 attack dimensions, +40 flat bonus), low-signal accumulation for multiple LOW-confidence findings
+- **Garak Integration** - Optional NVIDIA Garak LLM vulnerability scanner integration via `deep_scan` parameter for advanced encoding probes and latent injection detection
+- **PromptFoo Red-Team Suite** - 13 automated test cases with custom MCP provider for continuous bypass detection validation (`npm run test:redteam`)
+- **3 New YAML Rules** - Whitespace fragmentation, Crescendo escalation setup, leetspeak/character substitution obfuscation
+- **Test Coverage Expansion** - 28 new prompt scanner tests covering all bypass vectors and false positive regression
 
 ### v3.5.2
 - **Prompt Injection Fixes** - Closed 5 bypass vectors: tilde code fences (~~~), string fragmentation, base64 encoding, multi-turn escalation, and composite indicators
