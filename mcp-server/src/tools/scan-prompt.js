@@ -360,6 +360,103 @@ function hashPrompt(text) {
   return createHash('sha256').update(text).digest('hex').substring(0, 16);
 }
 
+// ============================================================================
+// TEXT NORMALIZATION PIPELINE (Garak Buff-inspired)
+// Normalizes input to defeat homoglyph, invisible char, and Unicode bypasses
+// ============================================================================
+
+// Homoglyph map: Cyrillic, Greek, and Latin Extended lookalikes → ASCII
+const HOMOGLYPH_MAP = {
+  // Cyrillic lowercase → Latin
+  '\u0430': 'a', // а → a
+  '\u0435': 'e', // е → e
+  '\u043E': 'o', // о → o
+  '\u0440': 'p', // р → p
+  '\u0441': 'c', // с → c
+  '\u0443': 'y', // у → y (visual match to y)
+  '\u0445': 'x', // х → x
+  '\u0456': 'i', // і → i
+  '\u04BB': 'h', // һ → h
+  '\u0455': 's', // ѕ → s
+  '\u0458': 'j', // ј → j
+  '\u043D': 'n', // н → n (Cyrillic en looks like n in some fonts)
+  // Cyrillic uppercase → Latin
+  '\u0410': 'A', // А → A
+  '\u0412': 'B', // В → B
+  '\u0415': 'E', // Е → E
+  '\u041A': 'K', // К → K
+  '\u041C': 'M', // М → M
+  '\u041D': 'H', // Н → H
+  '\u041E': 'O', // О → O
+  '\u0420': 'P', // Р → P
+  '\u0421': 'C', // С → C
+  '\u0422': 'T', // Т → T
+  '\u0425': 'X', // Х → X
+  '\u0406': 'I', // І → I
+  // Greek lowercase → Latin
+  '\u03B1': 'a', // α → a
+  '\u03B5': 'e', // ε → e
+  '\u03BF': 'o', // ο → o
+  '\u03C1': 'p', // ρ → p
+  '\u03BA': 'k', // κ → k
+  '\u03BD': 'v', // ν → v
+  // Greek uppercase → Latin
+  '\u0391': 'A', // Α → A
+  '\u0392': 'B', // Β → B
+  '\u0395': 'E', // Ε → E
+  '\u0397': 'H', // Η → H
+  '\u0399': 'I', // Ι → I
+  '\u039A': 'K', // Κ → K
+  '\u039C': 'M', // Μ → M
+  '\u039D': 'N', // Ν → N
+  '\u039F': 'O', // Ο → O
+  '\u03A1': 'P', // Ρ → P
+  '\u03A4': 'T', // Τ → T
+  '\u03A7': 'X', // Χ → X
+  '\u03A5': 'Y', // Υ → Y
+  '\u0396': 'Z', // Ζ → Z
+};
+
+// Invisible/zero-width characters to strip (regex)
+// Includes: soft hyphen, combining grapheme joiner, Arabic letter mark,
+// hangul fillers, Mongolian vowel separator, zero-width chars,
+// directional markers, word joiners, BOM, halfwidth hangul filler
+const INVISIBLE_CHAR_REGEX = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\u3164\uFEFF\uFFA0]/gu;
+
+// Zalgo combining diacritical marks to strip
+const ZALGO_REGEX = /[\u0300-\u036F\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]/g;
+
+// Unicode tag characters (U+E0000-U+E007F) - used in invisible ASCII tag attacks
+// These are encoded as surrogate pairs in JS, so we use a broader regex
+const TAG_CHAR_REGEX = /[\uE0000-\uE007F]/gu;
+
+function normalizeText(text) {
+  // Step 1: NFKC normalization
+  // Decomposes then recomposes in compatibility form
+  // Handles: fullwidth chars (ｉｇｎｏｒｅ → ignore), ligatures (ﬁ → fi),
+  //          superscripts, subscripts, circle-enclosed chars
+  let normalized = text.normalize('NFKC');
+
+  // Step 2: Strip invisible Unicode characters
+  normalized = normalized.replace(INVISIBLE_CHAR_REGEX, '');
+
+  // Step 3: Strip Unicode tag characters
+  normalized = normalized.replace(TAG_CHAR_REGEX, '');
+
+  // Step 4: Strip Zalgo combining diacritical marks
+  normalized = normalized.replace(ZALGO_REGEX, '');
+
+  // Step 5: Homoglyph canonicalization
+  // Replace each character through the map; unmapped chars pass through
+  normalized = normalized.split('').map(ch => HOMOGLYPH_MAP[ch] || ch).join('');
+
+  // Step 6: Normalize Unicode whitespace to ASCII space
+  // Includes: NBSP, en/em space, thin space, hair space, ideographic space, etc.
+  normalized = normalized.replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
+
+  return normalized;
+}
+
 // Export schema for tool registration
 export const scanAgentPromptSchema = {
   prompt_text: z.string().describe("The prompt or instruction text to analyze"),
@@ -374,15 +471,33 @@ export const scanAgentPromptSchema = {
 export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
   const findings = [];
 
+  // Normalize prompt text (Garak Buff-inspired preprocessing)
+  const normalizedPrompt = normalizeText(prompt_text);
+
+  // Detect invisible Unicode characters in original text (obfuscation indicator)
+  const invisibleMatches = prompt_text.match(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uE0000-\uE007F]/gu);
+  if (invisibleMatches && invisibleMatches.length > 0) {
+    findings.push({
+      rule_id: 'runtime.invisible-unicode-detected',
+      category: 'obfuscation',
+      severity: 'WARNING',
+      message: `Invisible Unicode characters detected (${invisibleMatches.length} chars). These may hide malicious instructions from human review.`,
+      matched_text: `${invisibleMatches.length} invisible character(s) found`,
+      confidence: 'HIGH',
+      risk_score: '70',
+      action: 'WARN'
+    });
+  }
+
   // Load rules
   const agentRules = loadAgentAttackRules();
   const promptRules = loadPromptInjectionRules();
   const allRules = [...agentRules, ...promptRules];
 
   // 2.7: Extract content from code blocks and append to scan text
-  let expandedText = prompt_text;
+  let expandedText = normalizedPrompt;
   const codeBlockRegex = /```[\s\S]*?```/g;
-  const codeBlocks = prompt_text.match(codeBlockRegex);
+  const codeBlocks = normalizedPrompt.match(codeBlockRegex);
   if (codeBlocks) {
     for (const block of codeBlocks) {
       // Strip the ``` delimiters and extract inner content
