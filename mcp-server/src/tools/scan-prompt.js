@@ -49,6 +49,76 @@ const CONFIDENCE_MULTIPLIERS = {
   "LOW": 0.4
 };
 
+// Category co-occurrence matrix: pairs that together signal sophisticated attacks
+// Inspired by PromptFoo's jailbreak:composite strategy
+const CATEGORY_COOCCURRENCE_BOOSTS = {
+  'obfuscation+exfiltration': 0.20,
+  'obfuscation+malicious-injection': 0.20,
+  'obfuscation+prompt-injection-content': 0.15,
+  'obfuscation+prompt-injection-jailbreak': 0.15,
+  'social-engineering+exfiltration': 0.15,
+  'social-engineering+malicious-injection': 0.15,
+  'prompt-injection-encoded+prompt-injection-content': 0.20,
+  'prompt-injection-multi-turn+prompt-injection-content': 0.15,
+  'prompt-injection-jailbreak+exfiltration': 0.25,
+  'prompt-injection-jailbreak+prompt-injection-content': 0.15,
+  'agent-manipulation+exfiltration': 0.20,
+  'agent-manipulation+system-manipulation': 0.15,
+};
+
+// Calculate co-occurrence boost from category pairs
+function getCategoryCooccurrenceBoost(categories) {
+  let boost = 0;
+  const cats = [...categories];
+  for (let i = 0; i < cats.length; i++) {
+    for (let j = i + 1; j < cats.length; j++) {
+      const key1 = `${cats[i]}+${cats[j]}`;
+      const key2 = `${cats[j]}+${cats[i]}`;
+      boost += CATEGORY_COOCCURRENCE_BOOSTS[key1] || CATEGORY_COOCCURRENCE_BOOSTS[key2] || 0;
+    }
+  }
+  return Math.min(0.40, boost); // Cap total co-occurrence boost at 40%
+}
+
+// Orthogonal scoring channel: measures attack breadth independently of per-rule confidence
+// This is immune to per-rule confidence gaming
+function calculateOrthogonalScore(findings) {
+  const dimensions = new Set();
+
+  for (const f of findings) {
+    const cat = f.category || 'unknown';
+    // Map categories into orthogonal attack dimensions
+    if (['exfiltration', 'prompt-injection-extraction', 'prompt-injection-output'].includes(cat)) {
+      dimensions.add('extraction');
+    }
+    if (['malicious-injection', 'system-manipulation'].includes(cat)) {
+      dimensions.add('code-execution');
+    }
+    if (['obfuscation', 'prompt-injection-encoded'].includes(cat)) {
+      dimensions.add('evasion');
+    }
+    if (['social-engineering', 'prompt-injection-jailbreak'].includes(cat)) {
+      dimensions.add('social');
+    }
+    if (['prompt-injection-content', 'prompt-injection-context', 'prompt-injection-delimiter'].includes(cat)) {
+      dimensions.add('injection');
+    }
+    if (['prompt-injection-multi-turn'].includes(cat)) {
+      dimensions.add('persistence');
+    }
+    if (['agent-manipulation', 'prompt-injection-privilege'].includes(cat)) {
+      dimensions.add('privilege');
+    }
+  }
+
+  // Score based on number of orthogonal dimensions triggered
+  const dimCount = dimensions.size;
+  if (dimCount <= 1) return 0;
+  if (dimCount === 2) return 10;
+  if (dimCount === 3) return 25;
+  return 40; // 4+ dimensions
+}
+
 // Load agent attack rules from YAML
 function loadAgentAttackRules() {
   try {
@@ -194,6 +264,7 @@ function calculateRiskScore(findings, context) {
   if (findings.length === 0) return 0;
 
   let totalScore = 0;
+  const lowConfidenceCount = findings.filter(f => (f.confidence || 'MEDIUM') === 'LOW').length;
 
   for (const finding of findings) {
     const riskScore = parseInt(finding.risk_score) || 50;
@@ -226,7 +297,23 @@ function calculateRiskScore(findings, context) {
 
     // Per-finding boost (smaller than before)
     avgScore = avgScore * (1 + (findings.length - 1) * 0.05);
+
+    // Low-signal accumulation — multiple LOW-confidence findings compound
+    // Catches threshold gaming with many weak signals (PromptFoo composite strategy)
+    if (lowConfidenceCount >= 2) {
+      avgScore = avgScore * (1 + lowConfidenceCount * 0.08);
+    }
+
+    // Category co-occurrence boost for suspicious pairs
+    const cooccurrenceBoost = getCategoryCooccurrenceBoost(uniqueCategories);
+    if (cooccurrenceBoost > 0) {
+      avgScore = avgScore * (1 + cooccurrenceBoost);
+    }
   }
+
+  // Add orthogonal score as a flat bonus (independent of per-rule confidence)
+  const orthogonalBonus = calculateOrthogonalScore(findings);
+  avgScore = avgScore + orthogonalBonus;
 
   avgScore = Math.min(100, avgScore);
 
